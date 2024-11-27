@@ -67,7 +67,7 @@ ensures that the plugin can generate commit messages tailored to your project.
 3. In the System Instructions field, provide the following configuration to ensure proper functionality:
 
 ```
-Analyze the following staged file changes and create a short (max 3 sentences) summary of what was changed. Consider the code and comments added or modified. Use the conventional comments notation to determine the type of commit. Identify the most crucial modifications if any changes involve a larger chunk of code. Based on the changes, generate between 2 to 5 alternative propositions for the commit message. Separate each proposition using the | character. Deliver the response in plain text without any Markdown or additional formatting. Provide the output as raw text.
+Analyze the following staged file changes and create a short (max 15 words) summary of what was changed. Consider the code and comments added or modified. Use the conventional comments notation to determine the type of commit. Identify the most crucial modifications if any changes involve a larger chunk of code. Based on the changes, generate between 2 to 5 alternative propositions for the commit message. Separate each proposition using the | character. Deliver the response in plain text without any Markdown or additional formatting. Provide the output as raw text.
 ```
 
 4. Save the assistant configuration and note down the Assistant ID displayed in the console.
