@@ -1,18 +1,11 @@
 # CaperBush Zsh Plugin
 
-# Function triggered by autocompletion for `git commit -m "<tab>`
-_caper_bush_command() {
+caper_bush_get_messages() {
 
-  # Provide the array to compadd  
-  local git_command=${words[2]}
-  local git_flag=${words[3]}
-
-  # Check if the command is `git commit --message=`
-  if [[ $git_command != "commit" || $git_flag != "-m"*  ]]; then
+  local project_root=$(git rev-parse --show-toplevel 2>/dev/null)
+  if [[ -z $project_root ]]; then
     return 1
   fi
-
-  local project_root=$(git rev-parse --show-toplevel)
   local rules_file="$project_root/.caper-bush.yml"
 
   # No rules file found in project root directory, no need to proceed
@@ -24,6 +17,7 @@ _caper_bush_command() {
   local assistant_id=$(yq ".assistant_id" $rules_file)
   local thread_id=$(yq ".thread_id" $rules_file)
   local about=$(yq ".about" $rules_file)
+  
   
   # Check if required fields are set, if not, return error
   if [[ -z $api_key || -z $assistant_id || $api_key == "null" || $assistant_id == "null" ]]; then
@@ -50,58 +44,70 @@ _caper_bush_command() {
 
     yq -i '.thread_id = "'"$thread_id"'"' $rules_file
   fi
-  
-  # Extract the message from the command
-  local command="${git_command#--message=}"
-    
+
   # Check for staged changes
+  local current_commit=$(git rev-parse HEAD)
   local staged_files=$(git diff --cached --name-only)
   if [[ -z $staged_files ]]; then
-    printf "No staged changes found."
     return 1
   fi
 
   # Generate diff of staged changes
   local git_diff=$(git diff --cached)
 
+  # Combine the commit hash and the staged diff
+  local combined_state="${current_commit}\n${git_diff}"
+  local unique_state=$(echo -n "${combined_state}" | shasum | awk '{print $1}')
+  local cache_file="$ZSH_CACHE_DIR/caper-bush/$unique_state"
 
-  # Prompt to send to OpenAI API
+  if [[ -d "$ZSH_CACHE_DIR/caper-bush" ]]; then
+    if [[ -f $cache_file ]]; then
+      cat $cache_file
+      return 0
+    fi
+  else
+    mkdir -p "$ZSH_CACHE_DIR/caper-bush"
+  fi
+
+  # Create cache file
+  touch $cache_file
+
+  # Prepare message to send to OpenAI API
   local initial_message="### Additional Project Information:\n$about\n\n### Diff:\n$git_diff"
   local escaped_message=$(printf "%s" "$initial_message" | jq -Rs '.')
 
   # Send the message to the OpenAI API thread
-  local message_response=$(curl -s -X POST https://api.openai.com/v1/threads/$thread_id/messages \
+  curl -s -X POST https://api.openai.com/v1/threads/$thread_id/messages \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $api_key" \
     -H "OpenAI-Beta: assistants=v2" \
     -d '{
         "role": "user",
         "content": '"$escaped_message"'
-      }')
-  
-  # Call assistant to generate a response to the message
+      }' > /dev/null
+
+  # Trigger assistant run
   local create_run_response=$(curl -s -X POST https://api.openai.com/v1/threads/$thread_id/runs \
-    -H "Authorization: Bearer $OPENAI_API_KEY" \
+    -H "Authorization: Bearer $api_key" \
     -H "Content-Type: application/json" \
     -H "OpenAI-Beta: assistants=v2" \
     -d '{
       "assistant_id": "'"$assistant_id"'"
     }')
 
-  # Extract the run ID from the response
-  local run_id=$(printf "%s" "$create_run_response" | jq -r '.id')
+  # Extract run ID
+  local run_id=$(echo "$create_run_response" | jq -r '.id')
 
-   # Poll for the assistant's response
-  local response=""
+  # Poll for the assistant's response
   local response_status=""
   local counter=0
   while true; do
-    response=$(curl -s -X GET https://api.openai.com/v1/threads/$thread_id/runs/$run_id \
+    local response=$(curl -s -X GET https://api.openai.com/v1/threads/$thread_id/runs/$run_id \
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $api_key" \
       -H "OpenAI-Beta: assistants=v2")
 
-    response_status=$(printf '%s' "$response" | jq -r '.status')
+    response_status=$(echo "$response" | jq -r '.status')
     if [[ "$response_status" == "completed" ]]; then
       break
     fi
@@ -112,28 +118,53 @@ _caper_bush_command() {
     (( counter++ ))
   done
 
-  # Fetch the the latest message from the thread to get the assistant's response
-  local messages=$(curl -s -X GET "https://api.openai.com/v1/threads/$thread_id/messages?limit=1&run_id=$run_id" \
+  # Fetch the messages
+  local messages=$(curl -s -X GET "https://api.openai.com/v1/threads/$thread_id/messages?run_id=$run_id" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $api_key" \
-    -H "OpenAI-Beta: assistants=v2")
+    -H "OpenAI-Beta: assistants=v2" | jq -r '.data[0].content[0]?.text.value')
 
-  # Extract the assistant's response from the messages
-  local assistant_reply=$(printf "%s" "$messages" | jq -r '.data[0].content[0].text.value' | sed 's/```//g' | tr -d "\n")
-
-  # Output assistant's response as an autocomplete suggestion
-  if [[ -n "$assistant_reply" ]]; then
-
-    # Split the messages into an array using | as a delimiter
-    local -a messages_array=(${(s:|:)assistant_reply})
-    compadd -X 'Choose your message' -- "${messages_array[@]}"
-  else
+  if [[ -z $messages ]]; then
     return 1
   fi
+
+  messages=$(echo "$messages" | sed 's/```//g' | tr -d '\n')
+  local splited_messages=(${(@s:|:)messages})
+  for message in $splited_messages; do
+    local trimmed_message=$(echo "$message" | sed 's/^[ \t]*//;s/[ \t]*$//')
+    local word_count=$(echo "$trimmed_message" | wc -w)
+    if (( word_count <= 10 )); then
+      echo "$trimmed_message"
+      echo "$trimmed_message" >> $cache_file
+    fi
+  done
 
   return 0
 }
 
-# Add autocompletion for `git commit --message=`
+# Function triggered by autocompletion for `git commit -m "<tab>`
+_caper_bush_command() {
+    _arguments -C \
+      "1: :(commit)" \
+      '-m[Specify commit message]:message:->message'
+
+    case $state in
+      (message)
+        local -a messages
+        messages=("${(@f)$(caper_bush_get_messages)}")
+
+        if [[ $? -ne 0 ]]; then
+          return 1
+        fi
+        _describe -t messages 'Choose your message' messages
+        return 0
+      ;;
+    esac
+
+    # Fallback to default git completion for other commands
+    _git && return 0
+}
 compdef _caper_bush_command git
+
+
 
