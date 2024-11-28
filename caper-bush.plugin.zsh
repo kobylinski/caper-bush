@@ -152,10 +152,10 @@ _caper_bush_command() {
       (message)
         local -a messages
         messages=("${(@f)$(caper_bush_get_messages)}")
-
         if [[ $? -ne 0 ]]; then
           return 1
         fi
+        messages=("${(@)messages//:/\\:}")
         _describe -t messages 'Choose your message' messages
         return 0
       ;;
