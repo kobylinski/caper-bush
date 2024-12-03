@@ -17,7 +17,23 @@ caper_bush_get_messages() {
   local assistant_id=$(yq ".assistant_id" $rules_file)
   local thread_id=$(yq ".thread_id" $rules_file)
   local about=$(yq ".about" $rules_file)
+  local debug_file=$(yq ".debug" $rules_file | sed 's|^~|'"$HOME"'|')
+  local debug=false
   
+  if [[ -z $debug || $debug == "null" ]]; then
+    debug=false
+  else 
+    debug=true
+    if [[ ! -f $debug_file ]]; then
+      touch $debug_file
+    fi
+    echo "---------------------------------------------------------" >> $debug_file
+    echo "Project: ${project_root##*/}" >> $debug_file
+    echo " * API Key: $api_key" >> $debug_file
+    echo " * Assistant ID: $assistant_id" >> $debug_file
+    echo " * Thread ID: $thread_id" >> $debug_file
+    echo " * About: $about" >> $debug_file
+  fi
   
   # Check if required fields are set, if not, return error
   if [[ -z $api_key || -z $assistant_id || $api_key == "null" || $assistant_id == "null" ]]; then
@@ -33,6 +49,10 @@ caper_bush_get_messages() {
       -d '{
         "metadata": { "project": "'"${project_root##*/}"'" }
       }')
+
+    if [[ $debug == true ]]; then
+      echo "Thread Response: $thread_response" >> $debug_file
+    fi
 
     thread_id=$(echo "$thread_response" | jq -r '.id')
 
@@ -95,6 +115,10 @@ caper_bush_get_messages() {
       "assistant_id": "'"$assistant_id"'"
     }')
 
+  if [[ $debug == true ]]; then
+    echo "Create Run Response: $create_run_response" >> $debug_file
+  fi
+
   # Extract run ID
   local run_id=$(echo "$create_run_response" | jq -r '.id')
 
@@ -106,6 +130,10 @@ caper_bush_get_messages() {
       -H "Content-Type: application/json" \
       -H "Authorization: Bearer $api_key" \
       -H "OpenAI-Beta: assistants=v2")
+
+    if [[ $debug == true ]]; then
+      echo "Pool response: $response" >> $debug_file
+    fi
 
     response_status=$(echo "$response" | jq -r '.status')
     if [[ "$response_status" == "completed" ]]; then
@@ -123,6 +151,10 @@ caper_bush_get_messages() {
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $api_key" \
     -H "OpenAI-Beta: assistants=v2")
+
+  if [[ $debug == true ]]; then
+    echo "Messages Response: $messages_response" >> $debug_file
+  fi
 
   local messages=$(echo "$messages_response" | jq -r '.data[0].content[0]?.text.value')
 
