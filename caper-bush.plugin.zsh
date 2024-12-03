@@ -119,10 +119,12 @@ caper_bush_get_messages() {
   done
 
   # Fetch the messages
-  local messages=$(curl -s -X GET "https://api.openai.com/v1/threads/$thread_id/messages?run_id=$run_id" \
+  local messages_response=$(curl -s -X GET "https://api.openai.com/v1/threads/$thread_id/messages?run_id=$run_id" \
     -H "Content-Type: application/json" \
     -H "Authorization: Bearer $api_key" \
-    -H "OpenAI-Beta: assistants=v2" | jq -r '.data[0].content[0]?.text.value')
+    -H "OpenAI-Beta: assistants=v2")
+
+  local messages=$(echo "$messages_response" | jq -r '.data[0].content[0]?.text.value')
 
   if [[ -z $messages ]]; then
     return 1
